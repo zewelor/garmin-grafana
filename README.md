@@ -250,7 +250,7 @@ Updating with docker is super simple. Just go to the folder where the `compose.y
 
 ## Importing from Garmin connect export
 
-See [here](docs/manual-import-instructions.md) for instructions on how to import local files from Garmin Connect bulk export. This import path does not include intraday-level historic data.
+If you downloaded a bulk export .zip from the Garmin Connect website. You can import that data as well without having to be rate limited by API calls. See [here](docs/manual-import-instructions.md) for instructions.
 
 ## Export Data to CSV files
 

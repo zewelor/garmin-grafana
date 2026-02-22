@@ -1,6 +1,6 @@
 ### Garmin Bulk Importer (From Garmin Connect Export)
 
-If you downloaded your Garmin Connect account export, you can import supported data locally without relying on rate-limited API pulls for each day.
+If you downloaded a bulk export .zip from the Garmin Connect website. You can import that data as well without having to be rate limited by API calls.
 
 > [!IMPORTANT]
 > This import path does not restore intraday historic data from cold storage. It imports supported daily and activity-level data from your export.
