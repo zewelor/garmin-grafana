@@ -1,38 +1,40 @@
-### Manual .FIT Activity Import
+### Garmin Bulk Importer (From Garmin Connect Export)
 
-Use `fit_activity_importer.py` to import a local Garmin `.FIT` activity file into InfluxDB.
+If you downloaded your Garmin Connect account export, you can import supported data locally without relying on rate-limited API pulls for each day.
+
+> [!IMPORTANT]
+> This import path does not restore intraday historic data from cold storage. It imports supported daily and activity-level data from your export.
 
 #### Using Docker
 
-Use this when your Garmin Grafana stack is running locally.
+Use this method if your Garmin Grafana stack is running locally on the same machine.
 
-1. Stop the currently running `garmin-fetch-data` container.
-2. Run the importer and mount your local `.FIT` file into the container.
+1. Download your Garmin data export from Garmin Connect (this request may take several days to complete).
+2. Unzip the export archive to a local folder.
+3. Stop the currently running stack if needed:
+
+```bash
+docker compose down
+```
+
+4. Run the bulk importer and mount the unzipped export directory into the container:
 
 ```bash
 # In ~/garmin-grafana
-docker compose run --rm -v <path_to_fit_file>:/fit_file.fit garmin-fetch-data python /app/garmin_grafana/fit_activity_importer.py
+docker compose run --rm -v "<path_to_unzipped_export>:/bulk_export" -e MANUAL_START_DATE=YYYY-MM-DD -e MANUAL_END_DATE=YYYY-MM-DD garmin-fetch-data python /app/garmin_grafana/garmin_bulk_importer.py
 ```
 
 Example:
 
 ```bash
-docker compose run --rm -v "~/Downloads/F129000.FIT":/fit_file.fit garmin-fetch-data python /app/garmin_grafana/fit_activity_importer.py
+docker compose run --rm -v "$HOME/Downloads/Garmin Export 2025-11-27:/bulk_export" -e MANUAL_START_DATE=2018-01-01 -e MANUAL_END_DATE=2025-01-03 garmin-fetch-data python /app/garmin_grafana/garmin_bulk_importer.py
 ```
 
-#### Using Local Python Environment
-
-Use this when InfluxDB is remote or when you run the importer without Docker.
-
-1. Ensure your local environment has project dependencies installed.
-2. Run:
+5. Start regular online sync again:
 
 ```bash
-python src/garmin_grafana/fit_activity_importer.py --fit_file=<path_to_fit_file>
+docker compose up -d
 ```
 
-Optional dry run (prints points instead of writing to InfluxDB):
-
-```bash
-python src/garmin_grafana/fit_activity_importer.py --fit_file=<path_to_fit_file> --dry_run
-```
+> [!TIP]
+> If you want to continue on non-critical parse issues, add `--ignore_errors` at the end of the importer command.
