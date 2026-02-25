@@ -147,7 +147,7 @@ spec:
     spec:
       containers:
         - name: garmin-fetch-data
-          image: thisisarpanghosh/garmin-fetch-data:latest
+          image: ghcr.io/zewelor/garmin-grafana:latest
           envFrom:
             - configMapRef:
                 name: fetch-data-config

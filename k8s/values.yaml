@@ -70,8 +70,8 @@ influxdb:
       value: "true"
 garmin:
   image:
-    repository: ghcr.io/arpanghosh8453/garmin-fetch-data
-    tag: v0.3.0
+    repository: ghcr.io/zewelor/garmin-grafana
+    tag: latest
   port: 8000
   credentials:
     email: example@example.com
