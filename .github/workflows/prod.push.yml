@@ -17,7 +17,6 @@ on:
 
 env:
   IMAGE_NAME: garmin-grafana
-  IMAGE_TAG: latest
 
 jobs:
   build_and_push:
@@ -48,6 +47,7 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
