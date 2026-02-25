@@ -894,46 +894,7 @@ def fetch_activity_GPS(activityIDdict):
                                 }
                             }
                             points_list.append(point)
-                    for lap_record in all_laps_list:
-                        lap_time_iso = _safe_fit_time_to_utc_iso(lap_record, 'start_time', 'timestamp')
-                        if lap_time_iso:
-                            point = {
-                                "measurement": "ActivityLap",
-                                "time": lap_time_iso,
-                                "tags": {
-                                    "Device": GARMIN_DEVICENAME,
-                                    "Database_Name": INFLUXDB_DATABASE,
-                                    "ActivityID": activityID,
-                                    "ActivitySelector": activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type
-                                },
-                                "fields": {
-                                    "Index": int(lap_record.get('message_index', -1)) + 1,
-                                    "ActivityName": activity_type,
-                                    "Activity_ID": activityID,
-                                    "Elapsed_Time": lap_record.get('total_elapsed_time', None),
-                                    "Sport": lap_record.get('sport', None),
-                                    "Lengths": lap_record.get('num_lengths', None),
-                                    "Length_Index": lap_record.get('first_length_index', None),
-                                    "Distance": lap_record.get('total_distance', None),
-                                    "Cycles": lap_record.get('total_cycles', None),
-                                    "Avg_Stroke_Distance": lap_record.get('avg_stroke_distance', None),
-                                    "Moving_Duration": lap_record.get('total_moving_time', None),
-                                    "Standing_Duration": lap_record.get('time_standing', None),
-                                    "Avg_Speed": lap_record.get('enhanced_avg_speed', None),
-                                    "Max_Speed": lap_record.get('enhanced_max_speed', None),
-                                    "Calories": lap_record.get('total_calories', None),
-                                    "Avg_Power": lap_record.get('avg_power', None),
-                                    "Avg_HR": lap_record.get('avg_heart_rate', None),
-                                    "Max_HR": lap_record.get('max_heart_rate', None),
-                                    "Avg_Cadence": lap_record.get('avg_cadence', None),
-                                    "Avg_Temperature": lap_record.get('avg_temperature', None),
-                                    "Avg_Vertical_Oscillation": lap_record.get('avg_vertical_oscillation', None),
-                                    "Avg_Stance_Time": lap_record.get('avg_stance_time', None),
-                                    "Avg_Vertical_Ratio": lap_record.get('avg_vertical_ratio', None),
-                                    "Avg_Step_Length": lap_record.get('avg_step_length', None)
-                                }
-                            }
-                            points_list.append(point)
+                    # ActivityLap ingestion intentionally disabled.
                     if KEEP_FIT_FILES:
                         os.makedirs(FIT_FILE_STORAGE_LOCATION, exist_ok=True)
                         fit_path = os.path.join(FIT_FILE_STORAGE_LOCATION, activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type + ".fit")
