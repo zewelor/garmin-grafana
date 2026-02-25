@@ -17,7 +17,7 @@ spec:
         app: {{ .Release.Name }}-garmin
     spec:
       securityContext:
-        fsGroup: 1000
+        fsGroup: 65532
       initContainers:
         - name: wait-for-influxdb
           image: curlimages/curl:latest
@@ -33,8 +33,9 @@ spec:
         - name: garmin-fetch
           image: "{{ .Values.garmin.image.repository }}:{{ .Values.garmin.image.tag }}"
           securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
           envFrom:
             - secretRef:
                 name: {{ .Release.Name }}-credentials
@@ -48,7 +49,7 @@ spec:
               containerPort: {{ .Values.garmin.port }}
           volumeMounts:
             - name: garmin-tokens
-              mountPath: /home/appuser/.garminconnect
+              mountPath: /home/nonroot/.garminconnect
       volumes:
         - name: garmin-tokens
 {{- if .Values.garmin.tokens.persistence.enabled }}

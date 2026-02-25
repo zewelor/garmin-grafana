@@ -64,17 +64,13 @@ kubectl scale deployment garmin-grafana-garmin -n garmin-grafana --replicas=0
 ```bash
 kubectl run -it garmin-auth -n garmin-grafana --rm \
   --image=ghcr.io/zewelor/garmin-grafana:latest \
-  --overrides='{"spec":{"volumes":[{"name":"tokens","persistentVolumeClaim":{"claimName":"garmin-grafana-tokens"}}],"containers":[{"name":"garmin-auth","image":"ghcr.io/zewelor/garmin-grafana:latest","command":["/bin/bash"],"stdin":true,"tty":true,"env":[{"name":"GARMINCONNECT_EMAIL","value":"address@xyz.com"},{"name":"GARMINCONNECT_BASE64_PASSWORD","value":"12345678ABC"},{"name":"INFLUXDB_HOST","value":"garmin-grafana-influxdb"},{"name":"INFLUXDB_PORT","value":"8086"},{"name":"INFLUXDB_DATABASE","value":"GarminStats"},{"name":"INFLUXDB_USERNAME","value":"admin"},{"name":"INFLUXDB_PASSWORD","value":"yourPassword"}],"volumeMounts":[{"name":"tokens","mountPath":"/home/appuser/.garminconnect"}]}]}}'
+  --overrides='{"spec":{"securityContext":{"fsGroup":65532},"volumes":[{"name":"tokens","persistentVolumeClaim":{"claimName":"garmin-grafana-tokens"}}],"containers":[{"name":"garmin-auth","image":"ghcr.io/zewelor/garmin-grafana:latest","stdin":true,"tty":true,"securityContext":{"runAsUser":65532,"runAsGroup":65532,"runAsNonRoot":true},"env":[{"name":"GARMINCONNECT_EMAIL","value":"address@xyz.com"},{"name":"GARMINCONNECT_BASE64_PASSWORD","value":"12345678ABC"},{"name":"INFLUXDB_HOST","value":"garmin-grafana-influxdb"},{"name":"INFLUXDB_PORT","value":"8086"},{"name":"INFLUXDB_DATABASE","value":"GarminStats"},{"name":"INFLUXDB_USERNAME","value":"admin"},{"name":"INFLUXDB_PASSWORD","value":"yourPassword"}],"volumeMounts":[{"name":"tokens","mountPath":"/home/nonroot/.garminconnect"}]}]}}'
 ```
 
-### 3. Inside the pod, run the script
+### 3. Authenticate when prompted
 
-```bash
-export INFLUXDB_USERNAME=admin
-export INFLUXDB_PASSWORD="yourPassword"
-source /app/.venv/bin/activate
-python garmin_grafana/garmin_fetch.py
-```
+The container uses a distroless image and runs the fetch script directly.
+Enter Garmin credentials and MFA code when prompted in the terminal.
 
 Enter the MFA code when prompted, then type `exit` to leave the pod.
 
@@ -133,4 +129,3 @@ helm install garmin-grafana . --set grafana.enabled=false -n garmin-grafana --cr
 ```bash
 helm template garmin-grafana . -n garmin-grafana > garmin-grafana.yaml
 ```
-

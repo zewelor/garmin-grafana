@@ -145,9 +145,15 @@ spec:
       labels:
         app: garmin-fetch-data
     spec:
+      securityContext:
+        fsGroup: 65532
       containers:
         - name: garmin-fetch-data
           image: ghcr.io/zewelor/garmin-grafana:latest
+          securityContext:
+            runAsUser: 65532
+            runAsGroup: 65532
+            runAsNonRoot: true
           envFrom:
             - configMapRef:
                 name: fetch-data-config
@@ -155,7 +161,7 @@ spec:
                 name: garmin-grafana-secret
           volumeMounts:
             - name: garmin-token
-              mountPath: /home/appuser/.garminconnect
+              mountPath: /home/nonroot/.garminconnect
       volumes:
         - name: garmin-token
           persistentVolumeClaim:
