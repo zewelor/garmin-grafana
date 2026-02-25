@@ -18,24 +18,6 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 RUN uv sync --locked
 
-FROM python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION} AS runtime
-ARG PYTHON_VERSION
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH"
-
-WORKDIR /app
-
-RUN groupadd --gid 1000 appuser && useradd --uid 1000 --gid appuser --shell /bin/bash --create-home appuser
-
-COPY --chown=appuser:appuser --from=build /app/.venv /app/.venv
-COPY --chown=appuser:appuser src /app/
-
-USER appuser
-
-CMD ["python", "garmin_grafana/garmin_fetch.py"]
-
 FROM gcr.io/distroless/python3-debian13:nonroot AS distroless
 ARG PYTHON_VERSION
 
@@ -52,4 +34,4 @@ COPY --chown=nonroot:nonroot src /app/
 
 USER nonroot:nonroot
 
-CMD ["/usr/bin/python3", "garmin_grafana/garmin_fetch.py"]
+CMD ["garmin_grafana/garmin_fetch.py"]

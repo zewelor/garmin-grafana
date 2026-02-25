@@ -1,36 +1,37 @@
-# There is support for influxdb v3 (core) OSS, but it's highly recommended to use Influxdb 1.x versions with this project. 
+# Default stack in this branch uses QuestDB as the time-series backend.
+# The application still uses INFLUXDB_* env names for backwards compatibility.
 
 services:
   garmin-fetch-data:
-    restart: unless-stopped
-    image: thisisarpanghosh/garmin-fetch-data:latest
+    restart: "no"
+    image: garmingrafana:runtime
     container_name: garmin-fetch-data
-    # user: root # Runs the container as root user, uncomment this line if you are getting permission issues which can't be resolved otherwise. For this, you also need to change the below volume mount from './garminconnect-tokens:/home/appuser/.garminconnect' to './garminconnect-tokens:/root/.garminconnect' to ensure the token files persist during container rebuilding. 
+    # user: root # Runs the container as root user, uncomment this line if you are getting permission issues which can't be resolved otherwise.
     depends_on:
       - influxdb
     volumes:
-      - ./garminconnect-tokens:/home/appuser/.garminconnect # (persistent tokens storage - garminconnect-tokens folder must be owned by 1000:1000) - should be './garminconnect-tokens:/root/.garminconnect' instead if you are using using user: root
+      - ./garminconnect-tokens:/home/nonroot/.garminconnect # persistent token storage for the distroless nonroot user
     environment:
       - INFLUXDB_HOST=influxdb
-      - INFLUXDB_PORT=8086 # Influxdb V3 maps to 8181 instead of 8086 of V1
-      - INFLUXDB_USERNAME=influxdb_user # user should have read/write access to INFLUXDB_DATABASE (Required for influxdb 1.x, ignore for influxdb 3.x - set the 3.x specific variables)
-      - INFLUXDB_PASSWORD=influxdb_secret_password # (Required for influxdb 1.x, ignore for influxdb 3.x - set the 3.x specific variables)
+      - INFLUXDB_PORT=9000 # QuestDB HTTP/ILP endpoint
+      - INFLUXDB_USERNAME=influxdb_user # Kept for compatibility with existing app env naming
+      - INFLUXDB_PASSWORD=influxdb_secret_password # Kept for compatibility with existing app env naming
       - INFLUXDB_DATABASE=GarminStats
       - GARMINCONNECT_IS_CN=False # Set this to True if you are in mainland China or use Garmin-cn (Default False)
       #####################################################################################
       # - GARMINCONNECT_EMAIL=your_garminconnect_email # optional, read the setup docs. (remove or comment out this line altogether if not used)
       # - GARMINCONNECT_BASE64_PASSWORD=your_base64_encoded_garminconnect_password # optional, must be Base64 encoded, read setup docs. (remove or comment out this line altogether if not used)
       #####################################################################################
-      # The following ENV variables are required only if you are using influxdb V3 (You won't have to set the above )
+      # The following env vars are kept for compatibility with custom deployments.
+      # They are not required for the default local QuestDB setup.
       #####################################################################################
-      # - INFLUXDB_VERSION=1 # Required for influxdb V3, Default is 1, must be overridden with 3 if using Influxdb V3
-      # - INFLUXDB_V3_ACCESS_TOKEN=your_influxdb_admin_access_token # Required for influxdb V3 (ignored for V1), Set this to your admin access token (or a token that has database R/W access) - You can generate this by following step 3 notes in the README installation
+      # - INFLUXDB_VERSION=1
       #####################################################################################
       # The following ENV variables will override some default settings. 
       # Please read the README guide before using them as they may change how the script behaves
       #####################################################################################
       # - LOG_LEVEL=INFO # change to DEBUG to get DEBUG logs
-      # - UPDATE_INTERVAL_SECONDS=300 # Default update check interval is set to 5 minutes
+      # - MAX_CATCHUP_DAYS=2 # Maximum number of local calendar days to fetch in one automatic one-shot run
       # - FETCH_SELECTION=daily_avg,sleep,steps,heartrate,stress,breathing,hrv,vo2,activity,race_prediction,body_composition # This enables selection of fetch data : Check Discussion #119 to know what additional options are available (add them seperated by , but without a space)
       # - KEEP_FIT_FILES=False # Stores the FIT files (downloads and saves them) when set to True - read docs for more details
       # - ALWAYS_PROCESS_FIT_FILES=False # Enables processing FIT files even if GPS data is not present in it when set to True, default False
@@ -43,30 +44,19 @@ services:
     container_name: influxdb
     hostname: influxdb
     environment:
-      - INFLUXDB_DB=GarminStats
-      - INFLUXDB_USER=influxdb_user
-      - INFLUXDB_USER_PASSWORD=influxdb_secret_password
-      - INFLUXDB_DATA_INDEX_VERSION=tsi1
-      #############################################################
-      # The following ENV variables are applicable for InfluxDB V3
-      #############################################################
-      # - INFLUXDB3_MAX_HTTP_REQUEST_SIZE=10485760
-      # - INFLUXDB3_NODE_IDENTIFIER_PREFIX=Influxdb-node1
-      # - INFLUXDB3_BUCKET=GarminStats
-      # - INFLUXDB3_OBJECT_STORE=file
-      # - INFLUXDB3_DB_DIR=/data
-      # - INFLUXDB3_QUERY_FILE_LIMIT=5000 # this set to be a very high value if you want to view long term data
-    expose:
-      - '8086' # Influxdb V3 should expose "8181" (Change INFLUXDB_PORT on garmin-fetch-data appropriately for InfluxDB V3)
+      # QuestDB defaults are sufficient for initial setup.
+      # Optional hardening can be added via QDB_* variables.
+      - QDB_HTTP_ENABLED=true
     volumes:
-      - influxdb_data:/var/lib/influxdb # InfluxDB V3 bind mount should be set like - influxdb_data:/data if you set INFLUXDB3_DB_DIR=/data (instead of /var/lib/influxdb)
-    image: 'influxdb:1.11' # You must change this to 'quay.io/influxdb/influxdb3-core:latest' for influxdb V3
+      - influxdb_data:/var/lib/questdb
+    image: 'questdb/questdb:9.3.2'
 
   grafana:
     restart: unless-stopped
     container_name: grafana
     hostname: grafana
     environment:
+      - DS_GARMIN_STATS=garmin_stats
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_PLUGINS_PREINSTALL=marcusolsson-hourly-heatmap-panel
@@ -79,8 +69,18 @@ services:
       - GF_DATE_FORMATS_INTERVAL_YEAR=YYYY
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./Grafana_Datasource:/etc/grafana/provisioning/datasources # (optional) Self provisioning influxdb datasource
+      - ./Grafana_Datasource:/etc/grafana/provisioning/datasources # (optional) self provisioning Grafana datasource
       - ./Grafana_Dashboard:/etc/grafana/provisioning/dashboards # (optional) self provisioning grafana dashboard
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        mkdir -p /var/lib/grafana/dashboards &&
+        for f in /etc/grafana/provisioning/dashboards/*.json; do
+          [ -f "$$f" ] || continue;
+          sed "s|\$${DS_GARMIN_STATS}|$${DS_GARMIN_STATS}|g" "$$f" > /var/lib/grafana/dashboards/$$(basename "$$f");
+        done &&
+        /run.sh
     ports:
       - '3000:3000'
     image: 'grafana/grafana:latest'

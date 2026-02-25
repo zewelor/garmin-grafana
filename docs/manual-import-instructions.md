@@ -2,6 +2,10 @@
 
 If you downloaded a bulk export .zip from the Garmin Connect website. You can import that data as well without having to be rate limited by API calls.
 
+> [!NOTE]
+> This branch uses a local image tag in compose. Build it once before running commands:
+> `docker build -t garmingrafana:runtime .`
+
 > [!IMPORTANT]
 > This import path does not restore intraday historic data from cold storage. It imports supported daily and activity-level data from your export.
 
