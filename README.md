@@ -6,8 +6,13 @@
 
 A docker container to fetch data from Garmin servers and store the data in a local time-series database for visualization with Grafana.
 
+> [!IMPORTANT]
+> This repository is a fork of the original project: [arpanghosh8453/garmin-grafana](https://github.com/arpanghosh8453/garmin-grafana).
+> If you use this fork, please also support the original author and upstream project.
+> This fork is focused on QuestDB + Kubernetes deployment targets.
+
 > [!NOTE]
-> In this branch, `compose-example.yml` is configured for QuestDB by default (`influxdb` service name, `http://influxdb:9000`), while application env names remain `INFLUXDB_*` for compatibility.
+> In this fork, `compose-example.yml` is configured for QuestDB by default (`influxdb` service name, `http://influxdb:9000`), while application env names remain `INFLUXDB_*` for compatibility.
 >
 > Build the local distroless image once before running compose commands:
 > `docker build -t garmingrafana:runtime .`
