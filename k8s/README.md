@@ -26,8 +26,8 @@ influxdb:
 
 garmin:
   image:
-    repository: ghcr.io/arpanghosh8453/garmin-fetch-data
-    tag: v0.3.0
+    repository: ghcr.io/zewelor/garmin-grafana
+    tag: latest
   port: 8000
   tokens:
     persistence:
@@ -44,7 +44,7 @@ the file disables the installation of Grafana stacks, installs Influxdb with cus
 Now you can install the application using Helm:
 
 ```bash
-helm upgrade --install garmin-grafana oci://ghcr.io/arpanghosh8453/garmin-grafana \
+helm upgrade --install garmin-grafana oci://ghcr.io/zewelor/garmin-grafana \
      --version v0.3.1-helm --namespace garmin-grafana --create-namespace -f values.yaml --wait
 ```
 
@@ -63,8 +63,8 @@ kubectl scale deployment garmin-grafana-garmin -n garmin-grafana --replicas=0
 
 ```bash
 kubectl run -it garmin-auth -n garmin-grafana --rm \
-  --image=ghcr.io/arpanghosh8453/garmin-fetch-data:v0.3.0 \
-  --overrides='{"spec":{"volumes":[{"name":"tokens","persistentVolumeClaim":{"claimName":"garmin-grafana-tokens"}}],"containers":[{"name":"garmin-auth","image":"ghcr.io/arpanghosh8453/garmin-fetch-data:v0.3.0","command":["/bin/bash"],"stdin":true,"tty":true,"env":[{"name":"GARMINCONNECT_EMAIL","value":"address@xyz.com"},{"name":"GARMINCONNECT_BASE64_PASSWORD","value":"12345678ABC"},{"name":"INFLUXDB_HOST","value":"garmin-grafana-influxdb"},{"name":"INFLUXDB_PORT","value":"8086"},{"name":"INFLUXDB_DATABASE","value":"GarminStats"},{"name":"INFLUXDB_USERNAME","value":"admin"},{"name":"INFLUXDB_PASSWORD","value":"yourPassword"}],"volumeMounts":[{"name":"tokens","mountPath":"/home/appuser/.garminconnect"}]}]}}'
+  --image=ghcr.io/zewelor/garmin-grafana:latest \
+  --overrides='{"spec":{"volumes":[{"name":"tokens","persistentVolumeClaim":{"claimName":"garmin-grafana-tokens"}}],"containers":[{"name":"garmin-auth","image":"ghcr.io/zewelor/garmin-grafana:latest","command":["/bin/bash"],"stdin":true,"tty":true,"env":[{"name":"GARMINCONNECT_EMAIL","value":"address@xyz.com"},{"name":"GARMINCONNECT_BASE64_PASSWORD","value":"12345678ABC"},{"name":"INFLUXDB_HOST","value":"garmin-grafana-influxdb"},{"name":"INFLUXDB_PORT","value":"8086"},{"name":"INFLUXDB_DATABASE","value":"GarminStats"},{"name":"INFLUXDB_USERNAME","value":"admin"},{"name":"INFLUXDB_PASSWORD","value":"yourPassword"}],"volumeMounts":[{"name":"tokens","mountPath":"/home/appuser/.garminconnect"}]}]}}'
 ```
 
 ### 3. Inside the pod, run the script
@@ -133,5 +133,4 @@ helm install garmin-grafana . --set grafana.enabled=false -n garmin-grafana --cr
 ```bash
 helm template garmin-grafana . -n garmin-grafana > garmin-grafana.yaml
 ```
-
 
