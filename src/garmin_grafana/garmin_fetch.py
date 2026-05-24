@@ -34,8 +34,9 @@ INFLUXDB_USERNAME = os.getenv("INFLUXDB_USERNAME", 'influxdb_username') # Requir
 INFLUXDB_PASSWORD = os.getenv("INFLUXDB_PASSWORD", 'influxdb_access_password') # Required
 INFLUXDB_DATABASE = os.getenv("INFLUXDB_DATABASE", 'GarminStats') # Required
 TOKEN_DIR = os.getenv("TOKEN_DIR", "~/.garminconnect") # optional
-GARMINCONNECT_EMAIL = os.environ.get("GARMINCONNECT_EMAIL", None) # optional, asks in prompt on run if not provided
-GARMINCONNECT_PASSWORD = base64.b64decode(os.getenv("GARMINCONNECT_BASE64_PASSWORD")).decode("utf-8") if os.getenv("GARMINCONNECT_BASE64_PASSWORD") != None else None # optional, asks in prompt on run if not provided
+GARMINCONNECT_EMAIL = (os.environ.get("GARMINCONNECT_EMAIL") or "").strip() or None # optional, asks in prompt on run if not provided
+_garmin_pw_b64 = os.getenv("GARMINCONNECT_BASE64_PASSWORD")
+GARMINCONNECT_PASSWORD = base64.b64decode(_garmin_pw_b64).decode("utf-8").strip() if _garmin_pw_b64 else None # optional, asks in prompt on run if not provided
 GARMINCONNECT_IS_CN = True if os.getenv("GARMINCONNECT_IS_CN") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional if you are using a Chinese account
 GARMIN_DEVICENAME = os.getenv("GARMIN_DEVICENAME", "Unknown")  # optional, attempts to set the name automatically if not given
 GARMIN_DEVICEID = os.getenv("GARMIN_DEVICEID", None)  # optional, attempts to set the id automatically if not given
@@ -210,40 +211,45 @@ def get_last_influxdb_sync_time_utc():
 
 # %%
 def garmin_login():
-    try:
-        logging.info(f"Trying to login to Garmin Connect using token data from directory '{TOKEN_DIR}'...")
-        garmin = Garmin()
-        garmin.login(TOKEN_DIR)
-        logging.info("login to Garmin Connect successful using stored session tokens.")
+    token_store_expanded = os.path.expanduser(TOKEN_DIR)
+    token_store = token_store_expanded
+    if os.path.isfile(token_store_expanded) and (not token_store_expanded.endswith('.json')):
+        token_store = token_store_expanded + "_tokens"
+        logging.warning(
+            "TOKEN_DIR points to an existing file (%s). Using '%s' for native token storage compatibility",
+            token_store_expanded,
+            token_store,
+        )
 
-    except (FileNotFoundError, GarthHTTPError, GarminConnectAuthenticationError):
+    try:
+        logging.info(f"Trying to login to Garmin Connect using token data from '{token_store}'...")
+        garmin = Garmin()
+        garmin.login(token_store)
+        logging.info("Login to Garmin Connect successful using stored session tokens.")
+
+    except (FileNotFoundError, GarthHTTPError, GarminConnectAuthenticationError, GarminConnectConnectionError):
         logging.warning("Session is expired or login information not present/incorrect. You'll need to log in again...login with your Garmin Connect credentials to generate them.")
         try:
-            user_email = GARMINCONNECT_EMAIL or input("Enter Garminconnect Login e-mail: ")
-            user_password = GARMINCONNECT_PASSWORD or input("Enter Garminconnect password (characters will be visible): ")
+            user_email = (GARMINCONNECT_EMAIL or "").strip() or input("Enter Garminconnect Login e-mail: ").strip()
+            user_password = (GARMINCONNECT_PASSWORD or "").strip() or input("Enter Garminconnect password (characters will be visible): ").strip()
             garmin = Garmin(
-                email=user_email, password=user_password, is_cn=GARMINCONNECT_IS_CN, return_on_mfa=True
+                email=user_email, password=user_password, is_cn=GARMINCONNECT_IS_CN,
+                prompt_mfa=lambda: input("MFA one-time code (via email or SMS): ").strip(),
             )
-            result1, result2 = garmin.login()
-            if result1 == "needs_mfa":  # MFA is required
-                mfa_code = input("MFA one-time code (via email or SMS): ")
-                garmin.resume_login(result2, mfa_code)
-
-            garmin.garth.dump(TOKEN_DIR)
-            logging.info(f"Oauth tokens stored in '{TOKEN_DIR}' directory for future use")
-
-            garmin.login(TOKEN_DIR)
-            logging.info("login to Garmin Connect successful using stored session tokens. Please restart the script. Saved logins will be used automatically")
-            exit() # terminating script
+            garmin.login(token_store)
+            logging.info(f"Oauth tokens stored in '{token_store}' for future use")
+            logging.info("Login to Garmin Connect successful using credentials and MFA (if enabled). Continuing with current run")
 
         except (
             FileNotFoundError,
             GarthHTTPError,
+            GarminConnectConnectionError,
             GarminConnectAuthenticationError,
+            GarminConnectTooManyRequestsError,
             requests.exceptions.HTTPError,
         ) as err:
             logging.error(str(err))
-            raise Exception("Session is expired : please login again and restart the script")
+            raise Exception("Garmin login failed after credential/MFA attempt")
 
     return garmin
 
@@ -253,8 +259,12 @@ def write_points_to_influxdb(points):
     try:
         if len(points) != 0:
             if TAG_MEASUREMENTS_WITH_USER_EMAIL:
+                user_id = (
+                    getattr(garmin_obj, 'display_name', None)
+                    or getattr(getattr(garmin_obj, 'garth', None), 'profile', {}).get('userName', 'Unknown')
+                )
                 for item in points:
-                    item['tags'].update({'User_ID': garmin_obj.garth.profile.get('userName','Unknown')})
+                    item['tags'].update({'User_ID': user_id})
             # Write in chunks - Issue reported for large activities data containing >20000 points - Error 413 : payload too large
             for i in range(0, len(points), write_chunk_size):
                 influxdbclient.write_points(points[i:i + write_chunk_size])
@@ -729,17 +739,28 @@ def get_activity_summary(date_str):
                 'activityName': activity.get('activityName'),
             }
         if "startTimeGMT" in activity: # "startTimeGMT" should be available for all activities (fix #13)
+            activity_id = activity.get('activityId')
+            hr_zones_data = garmin_obj.get_activity_hr_in_timezones(activity_id)
+            hr_zone_boundaries = [None] * 5
+            if hr_zones_data:
+                for zone in hr_zones_data:
+                    zone_number = zone.get('zoneNumber')
+                    if zone_number is not None and 1 <= int(zone_number) <= 5:
+                        hr_zone_boundaries[int(zone_number) - 1] = zone.get('zoneLowBoundary')
+            else:
+                logging.warning(f"No HR zone data found for activity: {activity_id}")
+
             points_list.append({
                 "measurement":  "ActivitySummary",
                 "time": datetime.strptime(activity["startTimeGMT"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC).isoformat(),
                 "tags": {
                     "Device": GARMIN_DEVICENAME,
                     "Database_Name": INFLUXDB_DATABASE,
-                    "ActivityID": activity.get('activityId'),
+                    "ActivityID": activity_id,
                     "ActivitySelector": datetime.strptime(activity["startTimeGMT"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC).strftime('%Y%m%dT%H%M%SUTC-') + activity_type_key
                 },
                 "fields": {
-                    "Activity_ID": activity.get('activityId'),
+                    "Activity_ID": activity_id,
                     'Device_ID': activity.get('deviceId'),
                     'activityName': activity.get('activityName'),
                     'description': activity.get('description'),
@@ -763,6 +784,11 @@ def get_activity_summary(date_str):
                     'hrTimeInZone_3': int(val) if (val := activity.get('hrTimeInZone_3')) is not None else None,
                     'hrTimeInZone_4': int(val) if (val := activity.get('hrTimeInZone_4')) is not None else None,
                     'hrTimeInZone_5': int(val) if (val := activity.get('hrTimeInZone_5')) is not None else None,
+                    'hrZoneLowBoundary_1': hr_zone_boundaries[0],
+                    'hrZoneLowBoundary_2': hr_zone_boundaries[1],
+                    'hrZoneLowBoundary_3': hr_zone_boundaries[2],
+                    'hrZoneLowBoundary_4': hr_zone_boundaries[3],
+                    'hrZoneLowBoundary_5': hr_zone_boundaries[4],
                     'aerobicTrainingEffect': activity.get('aerobicTrainingEffect'),
                     'anaerobicTrainingEffect': activity.get('anaerobicTrainingEffect'),
                     'activityTrainingLoad': activity.get('activityTrainingLoad'),
@@ -791,6 +817,38 @@ def get_activity_summary(date_str):
             logging.warning(f"Skipped : Start Timestamp missing for activity id {activity.get('activityId')} for date {date_str}")
     return points_list, activity_with_gps_id_dict, strength_activity_id_dict
 
+
+# %%
+def purge_existing_strength_exercise_sets(activity_id):
+    """Delete stale strength rows before rewriting the current Garmin snapshot."""
+    if INFLUXDB_PORT == 9000:
+        logging.warning(
+            f"QuestDB exact purge is not enabled for StrengthExerciseSet activity {activity_id}. "
+            "Applying the default append behavior; edited exercises may produce duplicated rows."
+        )
+        return True
+
+    if not hasattr(influxdbclient, 'delete_series'):
+        logging.warning(
+            f"InfluxDB client does not support purging StrengthExerciseSet series for activity {activity_id}. "
+            "Applying the default append behavior; edited exercises may produce duplicated rows."
+        )
+        return True
+
+    try:
+        influxdbclient.delete_series(
+            measurement='StrengthExerciseSet',
+            tags={'ActivityID': str(activity_id)},
+        )
+        logging.info(f"Purged existing StrengthExerciseSet series for activity {activity_id}")
+        return True
+    except InfluxDBClientError as err:
+        logging.warning(
+            f"Failed to purge existing StrengthExerciseSet series for activity {activity_id}: {err}"
+        )
+        return False
+
+
 # %%
 def get_strength_training_data(strength_activity_id_dict):
     """Fetch strength training exercise sets and HR zones from Garmin Connect API.
@@ -805,9 +863,11 @@ def get_strength_training_data(strength_activity_id_dict):
         activity_selector = activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type
         activity_name = activity_info.get('activityName', activity_type)
 
+        exercise_set_points = None
         try:
             exercise_sets_data = garmin_obj.get_activity_exercise_sets(activity_id)
             exercises = exercise_sets_data.get('exerciseSets', []) or []
+            exercise_set_points = []
             set_counter = 0
             for exercise in exercises:
                 set_type = exercise.get('setType', '')
@@ -836,7 +896,7 @@ def get_strength_training_data(strength_activity_id_dict):
                     "Weight_kg": weight_kg,
                     "Duration_s": duration_s,
                 }
-                points_list.append({
+                exercise_set_points.append({
                     "measurement": "StrengthExerciseSet",
                     "time": set_time,
                     "tags": {
@@ -852,6 +912,14 @@ def get_strength_training_data(strength_activity_id_dict):
             logging.info(f"Success : Fetching {set_counter} strength exercise sets for activity {activity_id}")
         except Exception as err:
             logging.warning(f"Failed to fetch exercise sets for activity {activity_id}: {err}")
+
+        if exercise_set_points is not None:
+            if purge_existing_strength_exercise_sets(activity_id):
+                points_list.extend(exercise_set_points)
+            else:
+                logging.warning(
+                    f"Skipped : StrengthExerciseSet refresh for activity {activity_id} because stale rows could not be purged"
+                )
 
         try:
             hr_zones_data = garmin_obj.get_activity_hr_in_timezones(activity_id)
@@ -966,11 +1034,11 @@ def fetch_activity_GPS(activityIDdict):
                                     "ActivitySelector": activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type
                                 },
                                 "fields": {
-                                    "Index": int(session_record.get('message_index', -1)) + 1,
+                                    "Index": (int(v) if str(v := session_record.get('message_index', -1)).isdigit() else -1) + 1,
                                     "ActivityName": activity_type,
                                     "Activity_ID": activityID,
                                     "Sport": str(session_record.get('sport', None)), # Avoid partial write error 400 see #152#issuecomment-3084539416
-                                    "Sub_Sport": session_record.get('sub_sport', None),
+                                    "Sub_Sport": str(session_record.get('sub_sport', None)),
                                     "Pool_Length": session_record.get('pool_length', None),
                                     "Pool_Length_Unit": session_record.get('pool_length_unit', None),
                                     "Lengths": session_record.get('num_laps', None),
