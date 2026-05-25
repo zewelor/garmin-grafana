@@ -1,0 +1,5 @@
+services:
+  questdb:
+    image: questdb/questdb:9.3.2
+    ports:
+      - "19001:9000"

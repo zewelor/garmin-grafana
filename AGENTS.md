@@ -65,12 +65,12 @@ InfluxDB `delete_series`. Do not copy that implementation directly into
 this fork: the default backend here is QuestDB. Exact QuestDB cleanup must
 be designed and verified separately.
 
-The current code has the upstream purge hook for non-QuestDB InfluxDB
-targets, but intentionally keeps append behavior for the default QuestDB
-port `9000` because the current QuestDB docs lookup via Context7 showed
-`/exec` as the HTTP SQL endpoint and did not show a simple direct
-row-delete equivalent for this use case. Verify against current QuestDB
-docs/runtime before replacing that fallback with exact QuestDB cleanup.
+The current code recognizes QuestDB by probing its `/exec` SQL endpoint.
+Because current QuestDB docs say direct row deletion is not supported, the
+QuestDB path rebuilds `StrengthExerciseSet` without the refreshed
+`ActivityID`, then writes the fresh Garmin snapshot. The rebuilt table keeps
+WAL deduplication with `UPSERT KEYS(timestamp, ActivityID, SetOrder)`. Keep
+`tests/questdb_strength_cleanup/run.sh` passing if this behavior changes.
 
 ## Verification
 

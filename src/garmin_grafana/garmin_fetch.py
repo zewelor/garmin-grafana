@@ -818,15 +818,75 @@ def get_activity_summary(date_str):
     return points_list, activity_with_gps_id_dict, strength_activity_id_dict
 
 
+def _execute_questdb_sql(sql_query):
+    scheme = "http" if INFLUXDB_ENDPOINT_IS_HTTP else "https"
+    questdb_exec_url = f"{scheme}://{INFLUXDB_HOST}:{INFLUXDB_PORT}/exec"
+    response = requests.get(questdb_exec_url, params={"query": sql_query}, timeout=15)
+    if response.status_code != 200:
+        try:
+            response_json = response.json() if response.text else {}
+        except ValueError:
+            response_json = {}
+        raise RuntimeError(response_json.get("error") or response.text)
+    return response.json() if response.text else {}
+
+
+def _is_questdb_endpoint():
+    try:
+        _execute_questdb_sql("select 1")
+        return True
+    except (RuntimeError, requests.RequestException):
+        return False
+
+
+def _questdb_sql_string(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _rebuild_questdb_strength_exercise_sets_without_activity(activity_id):
+    temp_table = "StrengthExerciseSet_refresh"
+    activity_id_sql = _questdb_sql_string(activity_id)
+    _execute_questdb_sql(f"DROP TABLE IF EXISTS {temp_table}")
+    _execute_questdb_sql(
+        "CREATE TABLE "
+        f"{temp_table} AS ("
+        "SELECT * FROM StrengthExerciseSet "
+        f"WHERE ActivityID != {activity_id_sql}"
+        ") TIMESTAMP(timestamp) PARTITION BY DAY WAL "
+        "DEDUP UPSERT KEYS(timestamp, ActivityID, SetOrder)"
+    )
+    _execute_questdb_sql("DROP TABLE StrengthExerciseSet")
+    _execute_questdb_sql(f"RENAME TABLE {temp_table} TO StrengthExerciseSet")
+
+
 # %%
 def purge_existing_strength_exercise_sets(activity_id):
-    """Delete stale strength rows before rewriting the current Garmin snapshot."""
-    if INFLUXDB_PORT == 9000:
-        logging.warning(
-            f"QuestDB exact purge is not enabled for StrengthExerciseSet activity {activity_id}. "
-            "Applying the default append behavior; edited exercises may produce duplicated rows."
-        )
-        return True
+    """Prepare stale strength rows to be replaced by the current Garmin snapshot."""
+    if _is_questdb_endpoint():
+        try:
+            _rebuild_questdb_strength_exercise_sets_without_activity(activity_id)
+            logging.info(
+                "Removed existing QuestDB StrengthExerciseSet rows for activity %s "
+                "before writing refreshed snapshot",
+                activity_id,
+            )
+            return True
+        except RuntimeError as err:
+            if "table does not exist" in str(err):
+                logging.info(
+                    "StrengthExerciseSet table does not exist yet; no stale rows to purge for activity %s",
+                    activity_id,
+                )
+                return True
+            logging.warning(
+                f"Failed to rebuild QuestDB StrengthExerciseSet while refreshing activity {activity_id}: {err}"
+            )
+            return False
+        except requests.RequestException as err:
+            logging.warning(
+                f"Failed to contact QuestDB while preparing StrengthExerciseSet refresh for activity {activity_id}: {err}"
+            )
+            return False
 
     if not hasattr(influxdbclient, 'delete_series'):
         logging.warning(
