@@ -750,7 +750,8 @@ def get_activity_summary(date_str):
             else:
                 logging.warning(f"No HR zone data found for activity: {activity_id}")
 
-            points_list.append({
+            activity_summary_points = []
+            activity_summary_points.append({
                 "measurement":  "ActivitySummary",
                 "time": datetime.strptime(activity["startTimeGMT"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC).isoformat(),
                 "tags": {
@@ -796,7 +797,7 @@ def get_activity_summary(date_str):
                     'vigorousIntensityMinutes': activity.get('vigorousIntensityMinutes'),
                 }
             })
-            points_list.append({
+            activity_summary_points.append({
                 "measurement":  "ActivitySummary",
                 "time": (datetime.strptime(activity["startTimeGMT"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=pytz.UTC) + timedelta(seconds=int(activity.get('elapsedDuration', activity.get('duration', 0))))).isoformat(),
                 "tags": {
@@ -812,7 +813,13 @@ def get_activity_summary(date_str):
                     'activityType': "No Activity",
                 }
             })
-            logging.info(f"Success : Fetching Activity summary with id {activity.get('activityId')} for date {date_str}")
+            if purge_existing_activity_measurements(activity_id, ("ActivitySummary",), "ActivitySummary"):
+                points_list.extend(activity_summary_points)
+                logging.info(f"Success : Fetching Activity summary with id {activity.get('activityId')} for date {date_str}")
+            else:
+                logging.warning(
+                    f"Skipped : ActivitySummary refresh for activity {activity_id} because stale rows could not be purged"
+                )
         else:
             logging.warning(f"Skipped : Start Timestamp missing for activity id {activity.get('activityId')} for date {date_str}")
     return points_list, activity_with_gps_id_dict, strength_activity_id_dict
@@ -843,68 +850,102 @@ def _questdb_sql_string(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _rebuild_questdb_strength_exercise_sets_without_activity(activity_id):
-    temp_table = "StrengthExerciseSet_refresh"
+def _rebuild_questdb_table_without_activity(measurement, activity_id):
+    temp_table = f"{measurement}_refresh"
     activity_id_sql = _questdb_sql_string(activity_id)
     _execute_questdb_sql(f"DROP TABLE IF EXISTS {temp_table}")
-    _execute_questdb_sql(
-        "CREATE TABLE "
-        f"{temp_table} AS ("
-        "SELECT * FROM StrengthExerciseSet "
-        f"WHERE ActivityID != {activity_id_sql}"
-        ") TIMESTAMP(timestamp) PARTITION BY DAY WAL "
-        "DEDUP UPSERT KEYS(timestamp, ActivityID, SetOrder)"
-    )
-    _execute_questdb_sql("DROP TABLE StrengthExerciseSet")
-    _execute_questdb_sql(f"RENAME TABLE {temp_table} TO StrengthExerciseSet")
+
+    dedup_keys_map = {
+        "StrengthExerciseSet": "timestamp, ActivityID, SetOrder",
+        "StrengthHRZones": "timestamp, ActivityID, Zone",
+        "ActivitySummary": "timestamp, ActivityID",
+    }
+
+    dedup_clause = ""
+    if measurement in dedup_keys_map:
+        dedup_clause = f" DEDUP UPSERT KEYS({dedup_keys_map[measurement]})"
+
+    try:
+        _execute_questdb_sql(
+            "CREATE TABLE "
+            f"{temp_table} AS ("
+            f"SELECT * FROM {measurement} "
+            f"WHERE ActivityID != {activity_id_sql}"
+            f") TIMESTAMP(timestamp) PARTITION BY DAY WAL{dedup_clause}"
+        )
+        _execute_questdb_sql(f"DROP TABLE {measurement}")
+        _execute_questdb_sql(f"RENAME TABLE {temp_table} TO {measurement}")
+    except RuntimeError as err:
+        if "table does not exist" in str(err):
+            logging.info(
+                f"{measurement} table does not exist yet; no stale rows to purge for activity {activity_id}"
+            )
+            _execute_questdb_sql(f"DROP TABLE IF EXISTS {temp_table}")
+            return
+        raise
 
 
 # %%
-def purge_existing_strength_exercise_sets(activity_id):
-    """Prepare stale strength rows to be replaced by the current Garmin snapshot."""
+def purge_existing_activity_measurements(activity_id, measurements, measurement_label):
+    """Delete stale activity rows before rewriting the current Garmin snapshot.
+
+    Activity-derived series can keep stale rows in parallel when Garmin changes
+    mutable tags such as ActivitySelector, activity type, or exercise labels.
+    Purging by ActivityID lets the refreshed snapshot replace the old one.
+    """
+    if isinstance(measurements, str):
+        measurements = [measurements]
+
+    measurement_names = [measurement for measurement in measurements if measurement]
+    if not measurement_names:
+        return True
+
     if _is_questdb_endpoint():
+        large_tables = {"ActivityGPS", "ActivitySession", "ActivityLength", "ActivityLap", "CyclingDynamics"}
         try:
-            _rebuild_questdb_strength_exercise_sets_without_activity(activity_id)
-            logging.info(
-                "Removed existing QuestDB StrengthExerciseSet rows for activity %s "
-                "before writing refreshed snapshot",
-                activity_id,
-            )
+            for measurement in measurement_names:
+                if measurement in large_tables:
+                    logging.info(
+                        f"Skipping QuestDB table rebuild for large measurement {measurement} "
+                        f"for activity {activity_id}"
+                    )
+                    continue
+
+                _rebuild_questdb_table_without_activity(measurement, activity_id)
+                logging.info(
+                    f"Removed existing QuestDB {measurement} rows for activity {activity_id} "
+                    "before writing refreshed snapshot"
+                )
             return True
         except RuntimeError as err:
-            if "table does not exist" in str(err):
-                logging.info(
-                    "StrengthExerciseSet table does not exist yet; no stale rows to purge for activity %s",
-                    activity_id,
-                )
-                return True
             logging.warning(
-                f"Failed to rebuild QuestDB StrengthExerciseSet while refreshing activity {activity_id}: {err}"
+                f"Failed to rebuild QuestDB tables while refreshing activity {activity_id}: {err}"
             )
             return False
         except requests.RequestException as err:
             logging.warning(
-                f"Failed to contact QuestDB while preparing StrengthExerciseSet refresh for activity {activity_id}: {err}"
+                f"Failed to contact QuestDB while preparing tables refresh for activity {activity_id}: {err}"
             )
             return False
 
     if not hasattr(influxdbclient, 'delete_series'):
         logging.warning(
-            f"InfluxDB client does not support purging StrengthExerciseSet series for activity {activity_id}. "
-            "Applying the default append behavior; edited exercises may produce duplicated rows."
+            f"InfluxDB client does not support purging {measurement_label} series for activity {activity_id}. "
+            "Applying the default append behavior; edited activities may produce duplicated rows."
         )
         return True
 
     try:
-        influxdbclient.delete_series(
-            measurement='StrengthExerciseSet',
-            tags={'ActivityID': str(activity_id)},
-        )
-        logging.info(f"Purged existing StrengthExerciseSet series for activity {activity_id}")
+        for measurement in measurement_names:
+            influxdbclient.delete_series(
+                measurement=measurement,
+                tags={'ActivityID': str(activity_id)},
+            )
+        logging.info(f"Purged existing {measurement_label} series for activity {activity_id}")
         return True
     except InfluxDBClientError as err:
         logging.warning(
-            f"Failed to purge existing StrengthExerciseSet series for activity {activity_id}: {err}"
+            f"Failed to purge existing {measurement_label} series for activity {activity_id}: {err}"
         )
         return False
 
@@ -974,7 +1015,7 @@ def get_strength_training_data(strength_activity_id_dict):
             logging.warning(f"Failed to fetch exercise sets for activity {activity_id}: {err}")
 
         if exercise_set_points is not None:
-            if purge_existing_strength_exercise_sets(activity_id):
+            if purge_existing_activity_measurements(activity_id, ("StrengthExerciseSet",), "StrengthExerciseSet"):
                 points_list.extend(exercise_set_points)
             else:
                 logging.warning(
@@ -983,6 +1024,7 @@ def get_strength_training_data(strength_activity_id_dict):
 
         try:
             hr_zones_data = garmin_obj.get_activity_hr_in_timezones(activity_id)
+            strength_hr_zone_points = []
             for zone_info in hr_zones_data:
                 zone_number = zone_info.get('zoneNumber', zone_info.get('zone'))
                 if zone_number is None:
@@ -994,7 +1036,7 @@ def get_strength_training_data(strength_activity_id_dict):
                     "SecsInZone": zone_info.get('secsInZone'),
                     "ZoneLowBoundary": zone_info.get('zoneLowBoundary'),
                 }
-                points_list.append({
+                strength_hr_zone_points.append({
                     "measurement": "StrengthHRZones",
                     "time": (activity_start_time + timedelta(milliseconds=int(zone_number))).isoformat(),
                     "tags": {
@@ -1005,7 +1047,14 @@ def get_strength_training_data(strength_activity_id_dict):
                     },
                     "fields": data_fields
                 })
-            logging.info(f"Success : Fetching strength HR zones for activity {activity_id}")
+            if strength_hr_zone_points:
+                if purge_existing_activity_measurements(activity_id, ("StrengthHRZones",), "StrengthHRZones"):
+                    points_list.extend(strength_hr_zone_points)
+                    logging.info(f"Success : Fetching strength HR zones for activity {activity_id}")
+                else:
+                    logging.warning(
+                        f"Skipped : StrengthHRZones refresh for activity {activity_id} because stale rows could not be purged"
+                    )
         except Exception as err:
             logging.warning(f"Failed to fetch HR zones for activity {activity_id}: {err}")
 
@@ -1016,7 +1065,8 @@ def fetch_activity_GPS(activityIDdict):
     points_list = []
     for activityID in activityIDdict.keys():
         activity_type = activityIDdict[activityID]
-        initial_points_count = len(points_list)
+        activity_points = []
+        detail_measurements = ["ActivityGPS", "ActivitySession", "ActivityLength"]
         if (activityID in PARSED_ACTIVITY_ID_LIST) and (not FORCE_REPROCESS_ACTIVITIES):
             logging.info(f"Skipping : Activity ID {activityID} has already been processed within current runtime")
             continue
@@ -1080,7 +1130,7 @@ def fetch_activity_GPS(activityIDdict):
                                     "Step_Length": parsed_record.get('step_length', None)
                                 }
                             }
-                            points_list.append(point)
+                            activity_points.append(point)
                     for session_record in all_sessions_list:
                         session_time_iso = _safe_fit_time_to_utc_iso(session_record, 'start_time', 'timestamp')
                         if session_time_iso:
@@ -1109,7 +1159,7 @@ def fetch_activity_GPS(activityIDdict):
                                     "Recovery_Time": session_record.get('recovery_time', None)
                                 }
                             }
-                            points_list.append(point)
+                            activity_points.append(point)
                     for length_record in all_lengths_list:
                         length_time_iso = _safe_fit_time_to_utc_iso(length_record, 'start_time', 'timestamp')
                         if length_time_iso:
@@ -1134,7 +1184,7 @@ def fetch_activity_GPS(activityIDdict):
                                     "Avg_Cadence": length_record.get('avg_swimming_cadence', None)
                                 }
                             }
-                            points_list.append(point)
+                            activity_points.append(point)
                     # ActivityLap ingestion intentionally disabled.
                     if KEEP_FIT_FILES:
                         os.makedirs(FIT_FILE_STORAGE_LOCATION, exist_ok=True)
@@ -1218,14 +1268,21 @@ def fetch_activity_GPS(activityIDdict):
                                 "lap": lap_index
                             }
                         }
-                        points_list.append(point)
+                        activity_points.append(point)
                     
                     lap_index += 1
-        if len(points_list) > initial_points_count:
-            logging.info(f"Success : Fetching detailed activity for Activity ID {activityID}")
-            PARSED_ACTIVITY_ID_LIST.append(activityID)
+
+        if purge_existing_activity_measurements(activityID, detail_measurements, "activity detail"):
+            points_list.extend(activity_points)
+            if len(activity_points) > 0:
+                logging.info(f"Success : Fetching detailed activity for Activity ID {activityID}")
+                PARSED_ACTIVITY_ID_LIST.append(activityID)
+            else:
+                logging.warning(f"No detailed activity points were produced for Activity ID {activityID}")
         else:
-            logging.warning(f"No detailed activity points were produced for Activity ID {activityID}")
+            logging.warning(
+                f"Skipped : activity detail refresh for activity {activityID} because stale rows could not be purged"
+            )
     return points_list
 
 def get_lactate_threshold(date_str):

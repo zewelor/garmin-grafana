@@ -88,7 +88,7 @@ def main() -> None:
 
     from garmin_grafana import garmin_fetch
 
-    assert garmin_fetch.purge_existing_strength_exercise_sets(ACTIVITY_ID)
+    assert garmin_fetch.purge_existing_activity_measurements(ACTIVITY_ID, ("StrengthExerciseSet",), "StrengthExerciseSet")
     garmin_fetch.write_points_to_influxdb([
         {
             "measurement": "StrengthExerciseSet",
