@@ -2,9 +2,9 @@
 # check=skip=SecretsUsedInArgOrEnv
 
 ARG PYTHON_VERSION=3.13
-ARG DEBIAN_VERSION=bookworm
+ARG DEBIAN_VERSION=trixie
 
-FROM ghcr.io/astral-sh/uv:0.6.17-python${PYTHON_VERSION}-${DEBIAN_VERSION}-slim AS build
+FROM ghcr.io/astral-sh/uv:0.12.3-python${PYTHON_VERSION}-${DEBIAN_VERSION}-slim AS build
 ARG PYTHON_VERSION
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

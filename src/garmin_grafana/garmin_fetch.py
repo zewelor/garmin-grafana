@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
 import xml.etree.ElementTree as ET
-from garth.exc import GarthHTTPError
 from garminconnect import (
     Garmin,
     GarminConnectAuthenticationError,
@@ -137,7 +136,6 @@ def get_last_watch_sync_time_utc(max_attempts=3):
             GarminConnectConnectionError,
             requests.exceptions.ConnectionError,
             requests.exceptions.Timeout,
-            GarthHTTPError,
             KeyError,
             TypeError,
             ValueError,
@@ -227,7 +225,7 @@ def garmin_login():
         garmin.login(token_store)
         logging.info("Login to Garmin Connect successful using stored session tokens.")
 
-    except (FileNotFoundError, GarthHTTPError, GarminConnectAuthenticationError, GarminConnectConnectionError):
+    except (FileNotFoundError, GarminConnectAuthenticationError, GarminConnectConnectionError):
         logging.warning("Session is expired or login information not present/incorrect. You'll need to log in again...login with your Garmin Connect credentials to generate them.")
         try:
             user_email = (GARMINCONNECT_EMAIL or "").strip() or input("Enter Garminconnect Login e-mail: ").strip()
@@ -242,7 +240,6 @@ def garmin_login():
 
         except (
             FileNotFoundError,
-            GarthHTTPError,
             GarminConnectConnectionError,
             GarminConnectAuthenticationError,
             GarminConnectTooManyRequestsError,
@@ -259,10 +256,7 @@ def write_points_to_influxdb(points):
     try:
         if len(points) != 0:
             if TAG_MEASUREMENTS_WITH_USER_EMAIL:
-                user_id = (
-                    getattr(garmin_obj, 'display_name', None)
-                    or getattr(getattr(garmin_obj, 'garth', None), 'profile', {}).get('userName', 'Unknown')
-                )
+                user_id = getattr(garmin_obj, 'display_name', None) or 'Unknown'
                 for item in points:
                     item['tags'].update({'User_ID': user_id})
             # Write in chunks - Issue reported for large activities data containing >20000 points - Error 413 : payload too large
@@ -1725,18 +1719,13 @@ def fetch_write_bulk(start_date_str, end_date_str):
                 logging.info(f"Waiting : for {FETCH_FAILED_WAIT_SECONDS} seconds")
                 time.sleep(FETCH_FAILED_WAIT_SECONDS)
                 repeat_loop = True
-            except (requests.exceptions.HTTPError, GarthHTTPError) as err:
+            except (requests.exceptions.HTTPError, GarminConnectConnectionError) as err:
                 # Check if this is a 500 error
                 is_500_error = False
-                if isinstance(err, requests.exceptions.HTTPError):
-                    if hasattr(err, 'response') and err.response is not None and err.response.status_code == 500:
-                        is_500_error = True
-                elif isinstance(err, GarthHTTPError):
-                    # GarthHTTPError may have status_code attribute or be wrapped around HTTPError
-                    if hasattr(err, 'status_code') and err.status_code == 500:
-                        is_500_error = True
-                    elif hasattr(err, 'response') and err.response is not None and err.response.status_code == 500:
-                        is_500_error = True
+                if hasattr(err, 'response') and err.response is not None and err.response.status_code == 500:
+                    is_500_error = True
+                elif hasattr(err, 'status_code') and err.status_code == 500:
+                    is_500_error = True
                 
                 if is_500_error:
                     consecutive_500_errors += 1

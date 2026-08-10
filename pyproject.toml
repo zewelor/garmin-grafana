@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = "==3.13.*"
 dependencies = [
     "fitparse==1.2.0",
-    "garminconnect>=0.2.35",
+    "garminconnect>=0.3.7",
     "influxdb==5.3.2",
 ]
 

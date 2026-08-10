@@ -1,0 +1,32 @@
+# Ignore hidden files and directories (.git, .venv, .env, etc.)
+.*
+
+# Python bytecode and build artifacts
+__pycache__/
+*.pyc
+*.pyo
+
+# Documentation and repository config
+*.md
+docs/
+Dockerfile*
+compose*.yaml
+compose*.yml
+kubernetes-spec-example.yaml
+easy-install.sh
+justfile
+Justfile
+LICENSE
+
+# Development assets, dashboards, and test suites
+Grafana_Dashboard/
+Grafana_Datasource/
+Extra/
+tests/
+k8s/
+
+# Logs and temporary files
+*.log
+tmp/
+dist/
+coverage/
