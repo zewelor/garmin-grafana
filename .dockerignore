@@ -2,17 +2,19 @@
 .*
 
 # Python bytecode and build artifacts
-__pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 
 # Documentation and repository config
 *.md
 docs/
+/*.toml
+/*.yml
+/*.yaml
+/*.json
+!pyproject.toml
 Dockerfile*
-compose*.yaml
-compose*.yml
-kubernetes-spec-example.yaml
 easy-install.sh
 justfile
 Justfile
