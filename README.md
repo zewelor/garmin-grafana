@@ -1,3 +1,6 @@
+> [!NOTE]
+> This fork is archived. My current Garmin project is [garmin-daily](https://github.com/zewelor/garmin-daily), which syncs daily Garmin Connect metrics to PostgreSQL.
+
 <p align="center">
 <img src="https://i.imgur.com/PYsbwqj.png" width="450" height="164" align="center">
 </p>
